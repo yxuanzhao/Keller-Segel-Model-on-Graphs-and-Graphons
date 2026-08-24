@@ -1,14 +1,15 @@
 function graphon()
 %% ---------------- parameters ----------------
+p.eps    = 1e-2;
 p.N      = 256;
-p.T      = 20000.0;
+p.T      = 30000.0;
 p.dt     = 1e-1;
 p.rho    = 0.10;
 p.eta_n  = 0.03;
 p.eta_c  = 0.05;
-p.w      = 4.75;
-%p.w      = 4.9;
 p.w_star = 4.68748;
+p.w      = p.w_star + (p.eps)^2;
+%p.w      = 4.9;
 p.alpha  = 0.05;
 p.beta   = 0.15;
 p.r      = 0.1;
@@ -18,7 +19,6 @@ p.S      = 6.0;
 p.k0       = 6;
 p.n0       = 6.0;
 p.c0       = 2.0;
-p.eps      = 1e-2;
 p.delta_n  = 1.0;
 p.delta_c  = 0.240621;
 
