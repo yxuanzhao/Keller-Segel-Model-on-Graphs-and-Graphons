@@ -1,124 +1,213 @@
-%% run_network_ode.m
+%% run_network_ode_corrected.m
 clear; clc;
 
-% ------------------ basic ------------------
-N = 9;
-%N = 20;
+% ---------------- parameters ----------------
+N   = 20;
+rho = 0.10;
 
-% Adjacency matrix A (example: symmetric random graph)
-A = zeros(N);
-rho = 0.1;
+par.N     = N;
+par.eta_n = 0.05;
+par.eta_c = 0.08;     % manuscript eta_c; RHS will contain eta_c/2
+par.rn    = 0.10;
+par.n0    = 8.0;
+par.alpha = 0.20;
+par.beta  = 0.10;
 
-for i = 1:N
-    ip = mod(i, N) + 1;          % i+1 with wrap (N -> 1)
-    im = mod(i-2, N) + 1;        % i-1 with wrap (1 -> N)
+par.c0    = par.alpha*par.n0/par.beta;
 
-    A(i, ip) = N/2;
-    A(i, im) = N/2;
+par.w_star = 0.3984580819264639;
+eps_bif    = 1e-2;
+par.w      = par.w_star + eps_bif^2;
+
+% ---------------- normalized uniform-band graph ----------------
+% W_rho(x,y) = (1/(2*rho)) 1_{d_T(x,y) <= rho}
+M = floor(rho*N);
+
+if M < 1 || 2*M >= N
+    error('Require 1 <= floor(rho*N) < N/2.');
 end
 
-% optional: make sure no self-loops (should already be true)
-A(1:N+1:end) = 0;
+shifts = [-M:-1, 1:M];
 
-% ------------------ parameters ------------------
-par.N     = N;
-par.A     = A;
+[I,S] = ndgrid((1:N)', shifts);
+J = mod(I - 1 + S, N) + 1;
 
-par.eta_n = 0.05;
-par.eta_c = 0.08;
+% There are 2M neighbors per row. Hence:
+% (1/N) * rowSum(A) = (1/N)*(2M)*(N/(2M)) = 1.
+edge_weight = N/(2*M);
+A = sparse(I(:), J(:), edge_weight, N, N);
 
-par.rn    = 0.1;     % growth rate
-par.n0    = 8.0;     % carrying capacity
+par.A = A;
 
-par.alpha = 0.2;
-par.beta  = 0.1;
+%fprintf('(1/N) row sums: min = %.16g, max = %.16g\n',min(sum(A,2))/N, max(sum(A,2))/N);
 
-w_star = (par.beta + par.eta_c)*(par.eta_n + par.rn)/(par.alpha*par.eta_n*par.n0);
-%par.w     = 0.3984580819264639 + 0.1;
-par.w     = 0.3984580819264639 + (0.01)^2;
-
-% ------------------ initial conditions ------------------
+% ---------------- reflection-symmetric initial data ----------------
+% Grid: x_i = (i-1)/N.
+% Reflection x -> 1-x maps MATLAB indices
+% [1,2,...,N] -> [1,N,N-1,...,2].
 seed = 21;
 rng(seed);
 
-eps_amp = 1e-2;                  % amplitude of small noise
-eps_n = eps_amp * randn(N,1);
-eps_c = eps_amp * randn(N,1);
+eps_amp = 1e-2;
 
-n_init = par.n0 + eps_n;
-c_star = par.alpha * par.n0 / par.beta;
-c_init = c_star + eps_c;
+reflection_index = [1, N:-1:2];
 
-y0 = [n_init; c_init];           % 2N x 1
+z_n = randn(N,1);
+z_c = randn(N,1);
 
-% ------------------ solve ODE ------------------
+z_n = 0.5 * (z_n + z_n(reflection_index));
+z_c = 0.5 * (z_c + z_c(reflection_index));
+
+n_init = par.n0 + eps_amp*z_n;
+
+c_star = par.alpha*par.n0/par.beta;
+c_init = c_star + eps_amp*z_c;
+
+y0 = [n_init; c_init];
+
+% ---------------- solve ----------------
 T_final = 5000;
-tspan = [0, T_final];
+opts = odeset( ...
+    'RelTol',1e-8, ...
+    'AbsTol',1e-10, ...
+    'NonNegative',1:2*N);
 
-opts = odeset('RelTol',1e-7,'AbsTol',1e-9);
-%[t, y] = ode45(@(t,y) rhs_network_ode(t,y,par), tspan, y0, opts);
-[t, y] = ode45(@(t,y) network_functions(t,y,par), tspan, y0, opts);
+[t,y] = ode15s( ...
+    @(t,y) rhs_uniform_band_graph(t,y,par), ...
+    [0,T_final], y0, opts);
 
-n = y(:, 1:N);
-c = y(:, N+1:2*N);
+% Extract time histories
+n_hist = y(:, 1:N);
+c_hist = y(:, N+1:2*N);
 
-% ------------------ plot ------------------
-%figure('Position',[100 100 900 650]);
-%tl = tiledlayout(2,1,'TileSpacing','compact','Padding','compact');
+% Manually select nodes
+selected_nodes = [1, 6, 9, 15, 17];
 
-nodes = [1 2 5 8 9];
-%nodes = [1 6 9 15 17];
+% Check that all selected nodes are valid
+if any(selected_nodes < 1) || any(selected_nodes > N)
+    error('All selected nodes must be between 1 and N.');
+end
 
+% ---------------- t versus n_i(t) ----------------
 figure;
-idx = 1:5:length(t);
-%plot(t(idx), n(idx,:), 'LineWidth', 2);
-plot(t(idx), n(idx,nodes), 'LineWidth', 2);
-yline(par.n0, '--black', 'LineWidth', 1);
-ylim([0, 16]);
-grid on; box on;
-xlabel('Time $t$', 'Interpreter', 'latex', 'FontSize',18); 
-ylabel('$n_i(t)$', 'Interpreter', 'latex', 'FontSize',18);
-title(sprintf('Nodes number $N = %d$', N), 'Interpreter', 'latex', 'FontSize',18);
-%legend(arrayfun(@(k) sprintf('$n_{%d}$',k), 1:N, 'UniformOutput', false), 'Location','eastoutside','Interpreter','latex','FontSize',10);
-legend(arrayfun(@(k) sprintf('$n_{%d}(t)$',k), nodes, 'UniformOutput', false),'Location','eastoutside','Interpreter','latex','FontSize',18);
+plot(t, n_hist(:,selected_nodes), 'LineWidth', 2);
 
+hold on;
+yline(par.n0, '--k', 'LineWidth', 2);
+hold off;
 
-figure;
-idx = 1:5:length(t);
-%plot(t(idx), c(idx,:), 'LineWidth', 2);
-plot(t(idx), c(idx,nodes), 'LineWidth', 2);
-yline(c_star, '--black', 'LineWidth', 1);
-ylim([8, 24]);
-grid on; box on;
-xlabel('Time $t$', 'Interpreter', 'latex', 'FontSize',18); 
-ylabel('$c_i(t)$', 'Interpreter', 'latex', 'FontSize',18);
-title(sprintf('Nodes number $N = %d$', N), 'Interpreter', 'latex', 'FontSize',18);
-%legend(arrayfun(@(k) sprintf('$c_{%d}$',k), 1:N, 'UniformOutput', false), 'Location', 'eastoutside', 'Interpreter', 'latex', 'FontSize',10);
-legend(arrayfun(@(k) sprintf('$c_{%d}(t)$',k), nodes, 'UniformOutput', false),'Location','eastoutside','Interpreter','latex','FontSize',18);
-
-
-n_snapshot = n(end, :);     % 1 × N
-c_snapshot = c(end, :);     % 1 × N
-
-figure;
-plot(1:N, n_snapshot, '-o', 'LineWidth', 2, 'MarkerSize', 8);
-yline(par.n0, '--black', 'LineWidth', 2);
-ylim([0, 16]);
-xlabel('Node index $i$', 'Interpreter','latex', 'FontSize',18);
-ylabel('$n_i$', 'Interpreter','latex', 'FontSize',18);
-title(sprintf('Snapshot of $n_i$ at $T=%d$ (Nodes number $%d$)', T_final, N), 'Interpreter','latex', 'FontSize',20);
 grid on;
+box on;
 
+xlabel('Time $t$', ...
+    'Interpreter','latex', 'FontSize',18);
+
+ylabel('$n_i(t)$', ...
+    'Interpreter','latex', 'FontSize',18);
+
+title(sprintf( ...
+    'Population dynamics (Number of nodes $N=%d$)', N), ...
+    'Interpreter','latex', 'FontSize',20);
+
+legend_labels = arrayfun( ...
+    @(i) sprintf('$n_{%d}(t)$',i), ...
+    selected_nodes, ...
+    'UniformOutput',false);
+
+%legend_labels{end+1} = '$\bar n$';
+ylim([5.5, 10.5]);
+
+legend(legend_labels, ...
+    'Interpreter','latex', ...
+    'Location','eastoutside', ...
+    'FontSize',14);
+
+
+% ---------------- t versus c_i(t) ----------------
 figure;
-plot(1:N, c_snapshot, '-o', 'LineWidth', 2, 'MarkerSize', 8);
-yline(c_star, '--black', 'LineWidth', 2);
-ylim([8, 24]);
-xlabel('Node index $i$', 'Interpreter','latex', 'FontSize',18);
-ylabel('$c_i$', 'Interpreter','latex', 'FontSize',18);
-title(sprintf('Snapshot of $c_i$ at $T=%d$ (Nodes number $%d$)', T_final, N), 'Interpreter','latex', 'FontSize',20);
+plot(t, c_hist(:,selected_nodes), 'LineWidth', 2);
+
+hold on;
+yline(c_star, '--k', 'LineWidth', 2);
+hold off;
+
 grid on;
+box on;
 
-set(gcf,'Renderer','painters');   % ← 关键一步
-drawnow;                          % ← 强烈推荐
+xlabel('Time $t$', ...
+    'Interpreter','latex', 'FontSize',18);
 
-exportgraphics(gcf, 'figure.pdf', 'ContentType','vector');
+ylabel('$c_i(t)$', ...
+    'Interpreter','latex', 'FontSize',18);
+
+title(sprintf( ...
+    'Chemical dynamics (Number of nodes $N=%d$)', N), ...
+    'Interpreter','latex', 'FontSize',20);
+
+legend_labels = arrayfun( ...
+    @(i) sprintf('$c_{%d}(t)$',i), ...
+    selected_nodes, ...
+    'UniformOutput',false);
+
+ylim([13, 19]);
+
+legend(legend_labels, ...
+    'Interpreter','latex', ...
+    'Location','eastoutside', ...
+    'FontSize',14);
+
+n_final = y(end,1:N).';
+c_final = y(end,N+1:2*N).';
+
+x = (0:N-1)'/N;
+
+% Final snapshots
+n_snapshot = y(end, 1:N).';
+c_snapshot = y(end, N+1:2*N).';
+
+% ---------------- n scatter plot ----------------
+figure;
+plot(1:N, n_snapshot, '-o', 'LineWidth', 2, 'MarkerSize', 8, Color = "#FF5F05");
+
+hold on;
+yline(par.n0, '--k', 'LineWidth', 4);
+hold off;
+
+range_1 = 1.3*max(abs(n_snapshot - par.n0));
+xlim([1, N])
+ylim([par.n0 - range_1, par.n0 + range_1]);
+xlabel('Node index $i$', ...
+    'Interpreter','latex', 'FontSize',18);
+ylabel('$n_i$', ...
+    'Interpreter','latex', 'FontSize',18);
+title(sprintf( ...
+    'Snapshot of $n_i$ at $t=%g$ (Number of nodes $N=%d$)', ...
+    T_final, N), ...
+    'Interpreter','latex', 'FontSize',20);
+
+grid on;
+box on;
+
+
+% ---------------- c scatter plot ----------------
+figure;
+plot(1:N, c_snapshot, '-o', 'LineWidth', 2, 'MarkerSize', 8, Color = "#FF5F05");
+
+hold on;
+yline(c_star, '--k', 'LineWidth', 4);
+hold off;
+
+range_2 = 1.3*max(abs(c_snapshot - par.c0));
+xlim([1, N]);
+ylim([par.c0 - range_2, par.c0 + range_2]);
+xlabel('Node index $i$', ...
+    'Interpreter','latex', 'FontSize',18);
+ylabel('$c_i$', ...
+    'Interpreter','latex', 'FontSize',18);
+title(sprintf( ...
+    'Snapshot of $c_i$ at $t=%g$ (Number of nodes $N=%d$)', ...
+    T_final, N), ...
+    'Interpreter','latex', 'FontSize',20);
+
+grid on;
+box on;
