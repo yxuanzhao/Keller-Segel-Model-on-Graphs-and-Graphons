@@ -18,7 +18,7 @@ Figures in the paper are generated using the Python and MATLAB simulation codes 
 - `bifurcation_graph_new_reaction.py` and `bifurcation_graph_new_reaction_small_world.py`: Generate **Figure 5**.
 - `run_network_ode.m` and `rhs_uniform_band_graph.m`: Generate **Figures 6 and 7**.
 - `run_network_ode_limit_cycles.m` and `rhs_limit_cycles.m`: Generate **Figure 8**.
-- `KS_simulation_ode15s.m` and `new_reaction_graphon_ode15s.m`: Generate **Figures 9, 10, and 11**.
+- `KS_simulation_ode15s.m` and `KS_simulation_ode15s_new_reaction.m`: Generate **Figures 9, 10, and 11**.
 - `graphon_chi_ode15s.m` and `graphon_chi_ode15s_new_reaction.m`: Generate **Figure 12**.
 
 ## Requirements
